@@ -1,0 +1,6 @@
+package server
+
+sourcedir = "./"
+depends = base, contrib, network
+
+modules = Server
