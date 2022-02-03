@@ -31,3 +31,6 @@ test: build install testbin test-setup test-only
 
 time:
 	time ${MAKE} test INTERACTIVE=''
+
+loadtest:
+	ab -r -n 15000 -c 6 localhost:8000/

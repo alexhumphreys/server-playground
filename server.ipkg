@@ -4,3 +4,6 @@ sourcedir = "./"
 depends = base, contrib, network
 
 modules = Server
+main = Server
+
+executable = server

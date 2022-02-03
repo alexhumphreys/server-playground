@@ -7,63 +7,58 @@ import Network.Socket
 import Network.Socket.Data
 import Network.Socket.Raw
 
+responseText : String
+responseText = """
+    HTTP/1.1 200 OK
+    Content-Type: application/json
+
+    {}
+    """
+
 testSocket : String
 testSocket = "./idris2_test.socket"
 
-runServer : (net : Bool) -> IO (Either String (if net then Port else ()))
-runServer net = do
-  Right sock <- socket (if net then AF_INET else AF_UNIX) Stream 0
-        | Left fail => pure (Left $ "Failed to open socket: " ++ show fail)
-  res <- bind sock (Just (Hostname (if net then "localhost" else testSocket))) 0
+runServer : IO ()
+runServer = do
+  Right sock <- socket AF_INET Stream 0
+        | Left fail => putStrLn $ "Failed to open socket: " ++ show fail
+  res <- bind sock (Just (Hostname "localhost")) 8000
   if res /= 0
-    then pure (Left $ "Failed to bind socket with error: " ++ show res)
+    then putStrLn $ "Failed to bind socket with error: " ++ show res
     else do
-      port <- if net then getSockPort sock else pure ()
-      res <- listen sock
-      if res /= 0
-         then pure . Left $ "Failed to listen on socket with error: " ++ show res
-         else do ignore $ fork (serve sock)
-                 pure $ Right port
+      port <- getSockPort sock
+      listenLoop forever sock
   where
+    sendResponse : Socket -> IO ()
+    sendResponse s = do
+      putStrLn ("s: " ++ (show s.descriptor))
+      Right  (str, _) <- recv s 1024
+        | Left err => putStrLn ("Failed to accept on socket with error: " ++ show err)
+      putStrLn ("Received req")
+      Right n <- send s responseText
+        | Left err => putStrLn ("Server failed to send data with error: " ++ show err)
+      close s
+      putStrLn ("response sent. closed.")
+      pure ()
+
     serve : Socket -> IO ()
     serve sock = do
       Right (s, _) <- accept sock
         | Left err => putStrLn ("Failed to accept on socket with error: " ++ show err)
       putStrLn ("s: " ++ (show s.descriptor))
-      Right  (str, _) <- recv s 1024
-        | Left err => putStrLn ("Failed to accept on socket with error: " ++ show err)
-      putStrLn ("Received: " ++ str)
-      Right n <- send s ("echo: " ++ str)
-        | Left err => putStrLn ("Server failed to send data with error: " ++ show err)
-      putStrLn ("exiting")
+      putStrLn "forking"
+      _ <- fork $ sendResponse s
       pure ()
-
-runClient : (net : Bool) -> Port -> IO ()
-runClient net serverPort = do
-  Right sock <- socket (if net then AF_INET else AF_UNIX) Stream 0
-    | Left fail => putStrLn ("Failed to open socket: " ++ show fail)
-  res <- connect sock (Hostname $ if net then "localhost" else testSocket) serverPort
-  if res /= 0
-    then putStrLn ("Failed to connect client to port " ++ show serverPort ++ ": " ++ show res)
-    else do
-      Right n <- send sock ("hello world from a " ++ (if net then "ipv4" else "unix") ++ " socket!")
-        | Left err => putStrLn ("Client failed to send data with error: " ++ show err)
-      Right (str, _) <- recv sock 1024
-        | Left err => putStrLn ("Client failed to receive on socket with error: " ++ show err)
-      -- assuming that stdout buffers get flushed in between system calls, this is "guaranteed"
-      -- to be printed after the server prints its own message
-      putStrLn ("Received: " ++ str)
+    listenLoop : Fuel -> Socket -> IO ()
+    listenLoop Dry sock = putStrLn $ "out of fuel"
+    listenLoop (More fuel) sock = do
+      res <- listen sock
+      if res /= 0
+         then putStrLn $ "Failed to listen on socket with error: " ++ show res
+         else do (serve sock)
+                 putStrLn "looping"
+                 listenLoop fuel sock
 
 main : IO ()
 main = do
-  Right serverPort <- runServer True
-    | Left err => putStrLn $ "[server] " ++ err
-  runClient True serverPort
-  putStrLn ("1")
-  runClient True serverPort
-  putStrLn ("2")
-  runClient True serverPort
-  putStrLn ("3")
-  runClient True serverPort
-  putStrLn ("4")
-  ignore $ removeFile testSocket
+  runServer
